@@ -55,10 +55,6 @@ public:
 		if(state){
 			s.attach(servo_pin);
 			digitalWrite(mosfet_pin, HIGH);
-			//for(pos = open_val; pos <= close_val; pos += 1){				// close_val > open_val
-			//	s.write(pos);
-			//	delay(10);
-			//}
 			s.write(close_val);
 			delay(work_time);
 			digitalWrite(mosfet_pin, LOW);
@@ -158,10 +154,10 @@ void loop() {
 						Serial.print(i);	Serial.print("\t");	Serial.println(knock.delays[i]);
 					}
 					//Serial.println("start PlaySequence()");
-					door.bzzz();
+					//door.bzzz();
 					knock.PlaySequence();
 					//Serial.println("end PlaySequence()");
-					door.bzzz();
+					//door.bzzz();
 					Serial.println("g_state = OPEN");
 					g_state = OPEN;
 				}else{

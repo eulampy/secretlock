@@ -179,16 +179,7 @@ void loop() {
 						//safelock.bzzz();
 						Serial.println("g_state = OPEN");
 					}
-<<<<<<< HEAD
-					//Serial.println("start PlaySequence()");
-					//door.bzzz();
-					knock.PlaySequence();
-					//Serial.println("end PlaySequence()");
-					//door.bzzz();
-					Serial.println("g_state = OPEN");
-=======
 					knock.WriteEEPROMData();
->>>>>>> c77edc35c02ad24c87a0425b8b8fb10f619b5a6d
 					g_state = OPEN;
 				}else{
 					if(DEBUG) Serial.println("no knock sequence");

@@ -1,6 +1,6 @@
 #include "Knock.h"
 
-Knock::Knock(byte _led_pin, byte _sensor_pin):
+Knock::Knock(uint8_t _led_pin, uint8_t _sensor_pin):
 	led_pin(_led_pin), sensor_pin(_sensor_pin){
 	pinMode(led_pin, OUTPUT);
 	digitalWrite(led_pin, LOW);
@@ -12,8 +12,8 @@ Knock::Knock(byte _led_pin, byte _sensor_pin):
 // возвращает "1", если последовательность была записана
 // "0" - если запись была прервана
 // функция останавливает главный цикл
-byte Knock::WriteSequence(){
-	//byte start_flag = 0;
+uint8_t Knock::WriteSequence(){
+	//uint8_t start_flag = 0;
 	unsigned long last_knock = millis();
 
 	// ждем первый стук
@@ -31,7 +31,7 @@ byte Knock::WriteSequence(){
 	}
 
 	unsigned long knock_delay;
-	byte wait_release = 1;	// флаг ожидания отпускния кнопки
+	uint8_t wait_release = 1;	// флаг ожидания отпускния кнопки
 
 	delay(50);	// 50 мс на дребезг 
 	
@@ -80,7 +80,7 @@ void Knock::PlaySequence(){
 		delay(50);
 		led_off();
 
-		for(byte i = 0; i < delays_count; i++){
+		for(uint8_t i = 0; i < delays_count; i++){
 			delay(delays[i] - 50); // тут может получиться очень большая величина, если записанный интервал будет меньше 50 мс
 			led_on();
 			delay(50);
@@ -101,7 +101,7 @@ CheckResult Knock::CheckSequence(){
 			if(is_knock()){
 				ch_last_knock = millis();
 				check_sequence = 1;		
-				Serial.println("0 OK: first press");
+				if(DEBUG) Serial.println("0 OK: first press");
 			}
 			break;
 		case 1:	// ждем отпускания кнопки
@@ -116,24 +116,24 @@ CheckResult Knock::CheckSequence(){
 			break;
 		case 2:	// ждем нажатия кнопки
 			if(ch_delay > delays[ch_delay_index] + DELAY_ERROR){	// слишком долго
-				Serial.print(ch_delay_index); Serial.print(" STOP: "); Serial.print(ch_delay);Serial.print(" > ");Serial.println(delays[ch_delay_index] + DELAY_ERROR);
+				if(DEBUG) {Serial.print(ch_delay_index); Serial.print(" STOP: "); Serial.print(ch_delay);Serial.print(" > ");Serial.println(delays[ch_delay_index] + DELAY_ERROR);}
 				reset_check_sequence();
 				return FAIL;
 			}else{
 				if(is_knock()){	// снова стук
 					if((DELAY_ERROR > delays[ch_delay_index]) || (ch_delay >= delays[ch_delay_index] - DELAY_ERROR)){ // и из условия выше !(ch_delay > delays[ch_delay_index] + DELAY_ERROR)
 						if(ch_delay_index < delays_count - 1){
-							Serial.print(ch_delay_index); Serial.print(" OK: "); Serial.print(delays[ch_delay_index] - DELAY_ERROR); Serial.print(" < "); Serial.print(ch_delay);Serial.print(" < "); Serial.println(delays[ch_delay_index] + DELAY_ERROR);
+							if(DEBUG) {Serial.print(ch_delay_index); Serial.print(" OK: "); Serial.print(delays[ch_delay_index] - DELAY_ERROR); Serial.print(" < "); Serial.print(ch_delay);Serial.print(" < "); Serial.println(delays[ch_delay_index] + DELAY_ERROR);}
 							ch_delay_index++;
 						}else{	// достигли конца последовательности
 							reset_check_sequence();
-							Serial.println("TADAAAAAM");
+							if(DEBUG) {Serial.println("TADAAAAAM");}
 							return SUCCESS;
 						}
 						ch_last_knock = millis();
 						check_sequence = 1;
 					}else{	// слишком быстро
-						Serial.print(ch_delay_index); Serial.print(" STOP: "); Serial.print(ch_delay);Serial.print(" < ");Serial.println(delays[ch_delay_index] - DELAY_ERROR);
+						if(DEBUG) {Serial.print(ch_delay_index); Serial.print(" STOP: "); Serial.print(ch_delay);Serial.print(" < ");Serial.println(delays[ch_delay_index] - DELAY_ERROR);}
 						reset_check_sequence();
 					}
 				}
@@ -142,5 +142,36 @@ CheckResult Knock::CheckSequence(){
 	} // end of switch
 
 	return CHECKING;
+}
+
+void Knock::WriteEEPROMData(){
+	if(delays_count > 0) {
+		if(DEBUG)Serial.print("Write delays to EEPROM...");
+		eeprom_write_byte((uint8_t *) 1, delays_count);
+		eeprom_write_block((void *) delays, (void *) 2, delays_count * sizeof(uint16_t));
+		if(DEBUG) {Serial.println("done!"); Serial.print((uint8_t) (delays_count * sizeof(uint16_t))); Serial.println(" bytes written.");}
+	}
+}
+
+
+uint8_t Knock::ReadEEPROMData(){
+	uint8_t somevalue = eeprom_read_byte((uint8_t *) 1);
+	if(DEBUG)Serial.println("Read delays count from EEPROM...");
+	if(somevalue == 0 || somevalue > MAX_KNOCKS_COUNT){
+		if(DEBUG){Serial.print("ERROR! - bad delays count: "); Serial.println(somevalue);}
+		return 0;
+	}
+	if(DEBUG){Serial.print("Delays found: ");Serial.println(somevalue);Serial.println("Read delays...");}
+	eeprom_read_block((void *) delays, (void *) 2, somevalue * sizeof(uint16_t));
+	// проверка прочитанного массива
+	for(uint8_t i = 0; i < somevalue; i++){
+		if(delays[i] > KNOCK_TIMEOUT){
+			if(DEBUG){Serial.print("ERROR! - bad delay value: "); Serial.println(delays[i]);}
+			return 0;
+		}
+	}
+	delays_count = somevalue;
+	if(DEBUG){Serial.print("Done! "); Serial.print(delays_count); Serial.println(" delays read.");} 
+	return delays_count;
 }
 

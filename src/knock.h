@@ -2,11 +2,14 @@
 #include <Arduino.h>
 #include <avr/eeprom.h>
 
+// начальный адрес хранения настроек в EEPROM
+#define EEPROM_SETTINGS_START_ADDR	0x0A
+
 #ifndef DEBUG
 	#define DEBUG	1         // режим отладки 
 #endif
 
-enum CheckResult {CHECKING = 0, NO_SEQUENCE, FAIL, SUCCESS};
+enum CheckResult {NO_KNOCKING = 0, CHECKING, NO_SEQUENCE, FAIL, SUCCESS};
 
 class Knock{
 private:

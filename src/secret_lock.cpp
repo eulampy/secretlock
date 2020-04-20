@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Servo.h>
+#include <LowPower.h>
 #include "Knock.h"
 
 #ifndef DEBUG
@@ -16,7 +17,7 @@
 // кнопки
 #define LIMIT_PIN		2	// пин концевика на закрытие
 #define LIMIT_HOLD_TIME	500	// время удержания концевика
-#define EXT_BUTTON_PIN	A4	// внешняя кнопка
+#define EXT_BUTTON_PIN	3	// внешняя кнопка (INT1)
 
 // сервопривод
 #define SERVOPIN		9
@@ -24,13 +25,18 @@
 #define OPEN_SERVO_VAL	30
 #define MOSFETPIN		13	// пин управления питанием сервопривода
 
-#define DEBUG_LED_PIN	4
+#define GREEN_LED_PIN	4
+#define RED_LED_PIN		5
+
 
 // глобальные переменные и типы
-enum StateEnum {WRITE = 0, OPEN, CLOSE};
+enum ButtonStateEnum {RELEASED = 0, PRESSED, WAIT_AFTER_RELEASE};
+enum DeviceStateEnum {WRITE = 0, OPEN, CLOSE} g_state;
+
 uint32_t time;
-StateEnum g_state;
-volatile uint32_t limit_press_time = 0;	// время нажатия концевика
+volatile uint32_t limit_press_time = 0;	// время нажатия 
+uint32_t idle_time = 0;			// время последнего действия с внешней кнопкой
+uint8_t red_led_blink = 0;		// флаг включения мигания красного светодиода (обрабатывается в функции  red_led_blinking())
 
 // хочу свой класс с блекджеком и шлюхами
 class Lock{
@@ -78,8 +84,6 @@ public:
 			digitalWrite(mosfet_pin, LOW);
 			s.detach();
 		}
-
-
 	}
 	Lock(){};
 	Lock(uint8_t _servo_pin, uint8_t _mosfet_pin, uint8_t _close_val, uint8_t _open_val):
@@ -90,7 +94,24 @@ public:
 };
 
 Lock safelock(SERVOPIN, MOSFETPIN, CLOSE_SERVO_VAL, OPEN_SERVO_VAL);
-Knock knock(DEBUG_LED_PIN, EXT_BUTTON_PIN);
+Knock knock(GREEN_LED_PIN, EXT_BUTTON_PIN);
+
+// сохранить состояние замка в EEPROM
+inline void WriteStateToEEPROM(){
+	eeprom_write_byte((uint8_t *) EEPROM_SETTINGS_START_ADDR, (uint8_t) g_state);
+}
+
+inline void red_led_on(){digitalWrite(RED_LED_PIN, HIGH);}
+inline void red_led_off(){digitalWrite(RED_LED_PIN, LOW);}
+void WakeUpHandler(){}	// пустой обработчик прерывания от внешней кнопки
+
+/*********************** прототипы функций ************************************/
+void red_led_blinking();	// моргание красным светодиодом раз в секунду
+void green_led_blinking();	// моргание зеленым светодиодом
+long readVcc();				// чтение напряжение питания
+void check_vcc();			// проверка напряжения питания
+uint8_t is_10secs_hold_down();	// проверка на удерживание кнопки больше 10 секунд
+
 
 void setup() {
 #if DEBUG == 1
@@ -98,20 +119,28 @@ void setup() {
 #endif
 
 	Serial.begin(9600);
-	
 	time = millis();
 	
 	// кнопки
 	pinMode(LIMIT_PIN, INPUT_PULLUP);
+	
+	// светодиоды
+	pinMode(RED_LED_PIN, OUTPUT);
 
-	uint8_t somevalue = eeprom_read_byte((uint8_t *) 0); // читаем значение g_state из EEPROM
+	// на время инициализации зажжем все светодиоды
+	red_led_on();
+	knock.led_on();
+	
+	//pinMode(GREEN_LED_PIN, OUTPUT);
+
+	uint8_t somevalue = eeprom_read_byte((uint8_t *) EEPROM_SETTINGS_START_ADDR); // читаем значение g_state из EEPROM
 	if(somevalue > CLOSE || somevalue == WRITE){ // прочиталась фигня
 		if(DEBUG){Serial.print("Bad g_state value from EEPROM: "); Serial.println(somevalue); Serial.println("g_state = WRITE");}
 		g_state = WRITE;
 	}else{	// прочиталось правильно
 		// пробуем прочитать значения задержек
 		if(knock.ReadEEPROMData()){	// если задержки прочитались
-			g_state = (StateEnum) somevalue;
+			g_state = (DeviceStateEnum) somevalue;
 			// на всякий случай приведем в соответствие состояние замка в программе и в реальности
 			if(g_state == OPEN) safelock.open();
 			else safelock.close();
@@ -125,16 +154,18 @@ void setup() {
 			if(DEBUG) Serial.println("g_state = WRITE");
 		}
 	}
+	check_vcc();	// проверка напряжения
+	
+	// конец инициализации
+	red_led_off();
+	knock.led_off();
+
+	
+	
 }
 
-// сохранить состояние замка в EEPROM
-inline void WriteStateToEEPROM(){
-	eeprom_write_byte((uint8_t *) 0, (uint8_t) g_state);
-}
 
 void loop() {
-	static uint8_t led_switch_flag = 1;
-	static long led_switch_time = 0;
 	static uint8_t write_step = 0;
 #if DEBUG == 1
 	enc1.tick();	// обязательная функция отработки. Должна постоянно опрашиваться
@@ -142,26 +173,12 @@ void loop() {
 	switch(g_state){
 		case WRITE:{	// запись последовательности
 			if(write_step == 0){	// ждем нажатия кнопки, призывно моргаем светодиодом
+				green_led_blinking();
+				
 				if(knock.is_knock()){	// дождались нажатия
 					knock.led_off();
-					//while(knock.is_knock());	// ждем отпускания кнопки (TODO: сделать это отдельным шагом g_state, что бы не фризить выполнение главного цикла)
 					delay(50);
 					write_step = 1;
-				}else{
-					long some_delay = millis() - led_switch_time;
-					if(!led_switch_flag){
-						if(some_delay > 50){
-							knock.led_off(); //Serial.println("led_off");
-							led_switch_time = millis();
-							led_switch_flag = 1;
-						}
-					}else{
-						if(some_delay > 450){
-							knock.led_on();	//Serial.println("led_on");
-							led_switch_time = millis();
-							led_switch_flag = 0;
-						}
-					}
 				}
 			}else{ // write_step == 1 -> запись последовательности
 				if(knock.WriteSequence() > 0){ // что-то записалось
@@ -180,7 +197,7 @@ void loop() {
 						Serial.println("g_state = OPEN");
 					}
 					knock.WriteEEPROMData();
-					g_state = OPEN;
+					g_state = OPEN; WriteStateToEEPROM();
 				}else{
 					if(DEBUG) Serial.println("no knock sequence");
 				}
@@ -189,6 +206,16 @@ void loop() {
 			}
 		} break;
 		case OPEN:{
+			red_led_blinking();	// если надо, то мигаем красным светодиодом
+			if(is_10secs_hold_down()){	// кнопка удерживается больше 10 секунд
+				safelock.bzzz();	// вжикнем, что бы отпустили кнопку
+				red_led_off();
+				if(DEBUG){Serial.println("Button holding for 10 secs"); Serial.println("g_state = WRITE");}
+				g_state = WRITE; WriteStateToEEPROM();
+				while(knock.is_knock());	// ждем отпускания кнопки
+				delay(1000);	// и еще паузу в 1 секунду
+			}
+
 			if(digitalRead(LIMIT_PIN) == LOW){
 				if(limit_press_time == 0){ // отсчет времени нажатия концевика еще не начался
 					limit_press_time = millis();
@@ -197,6 +224,7 @@ void loop() {
 						limit_press_time = 0;
 						safelock.close();
 						g_state = CLOSE; WriteStateToEEPROM();
+						red_led_off();
 						if(DEBUG){
 							Serial.println("g_state = CLOSE");
 							Serial.println("Door close...");
@@ -209,7 +237,6 @@ void loop() {
 			}
 		} break;
 		case CLOSE:{
-			// просто будет вызов тут
 			CheckResult check_result = knock.CheckSequence();
 			if(check_result == SUCCESS){
 				if(DEBUG){
@@ -220,7 +247,10 @@ void loop() {
 				safelock.open();
 				g_state = OPEN; WriteStateToEEPROM();
 				delay(1000);
-				// действие в случае успеха
+				
+				// проверим напряжение батареек
+				check_vcc();
+
 			}else if(check_result == FAIL){
 				while(knock.is_knock());	// ждем отпускания кнопки
 			}
@@ -236,21 +266,89 @@ void loop() {
 		safelock.open();
 		g_state = OPEN; WriteStateToEEPROM();
 	}
+
+	// if((millis() - time > 500) && (g_state != WRITE))
+	// {
+	// 	time = millis();
+	// 	Serial.print("V = ");
+	// 	Serial.println(readVcc());		
+	// }
 #endif
 
-/*
-	if((millis() - time > 500) && (g_state != WRITE))
-	{
-		time = millis();
-		Serial.print("V = ");
-		Serial.println(readVcc());		
-		Serial.print("door_state = ");
-		Serial.println(safelock.state);		
-	}
-	*/
+} // end of loop()
+
+
+////////////////////////////////////////////////////////////////////////////////
+// проверка на удерживание кнопки больше 10 секунд
+uint8_t is_10secs_hold_down(){
+	static unsigned long hold_down_time = 0;
+	static ButtonStateEnum func_state = RELEASED;
+
+	///static uint8_t func_state = 0;	// 0 - нет удержания, 1 - считаем время удерживания, 2 - ждем секунду после отпускания
+	switch (func_state) {
+		case RELEASED:
+			if(knock.is_knock()){
+				hold_down_time = millis();
+				func_state = PRESSED;
+				knock.led_on();
+			}
+			break;
+		case PRESSED:
+			if(knock.is_knock()){	// если кнопка все еще нажата
+				if(millis() - hold_down_time > 10000){	// и нажата больше 10 секунд
+					func_state = RELEASED;	// паузу не делаем
+					return 1;	
+				}
+			}else{ // отпустили раньше
+				func_state = WAIT_AFTER_RELEASE;	// сделаем паузу
+				hold_down_time = millis();
+				knock.led_off();
+			}
+		break;
+		case WAIT_AFTER_RELEASE:
+			if(millis() - hold_down_time > 1000) func_state = RELEASED;
+	}	// enf of switch
+
+	return 0;
 }
 
-float my_vcc_const = 1.0867;        // начальное значение константы вольтметра
+////////////////////////////////////////////////////////////////////////////////
+// переключение красного светодиода раз в секунду
+void red_led_blinking(){
+	static unsigned long last_blink_time = 0;
+	static uint8_t led_state = 1;
+	if(red_led_blink){
+		if(millis() - last_blink_time > 1000){
+			led_state = !led_state;
+			digitalWrite(RED_LED_PIN, led_state);
+			last_blink_time = millis();
+		}
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// переключение зеленого светодиода 
+void green_led_blinking(){
+	static unsigned long last_blink_time = 0;
+	static uint8_t led_state = 0;
+	if(!led_state){	// светодиод выключен
+		if(millis() - last_blink_time > 450){
+			led_state = !led_state;
+			knock.led_on();
+			last_blink_time = millis();
+		}
+	}else{	// светодиод включен
+		if(millis() - last_blink_time > 50){
+			led_state = !led_state;
+			knock.led_off();
+			last_blink_time = millis();
+		}
+	}
+}
+
+
+const float my_vcc_const = 1.095;		// начальное значение константы вольтметра
+const long low_battery_vvc = 3500;		// минимальное значение питания
 
 long readVcc() { //функция чтения внутреннего опорного напряжения, универсальная (для всех ардуин)
 #if defined(__AVR_ATmega32U4__) || defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
@@ -271,4 +369,10 @@ long readVcc() { //функция чтения внутреннего опорн
 
 	result = my_vcc_const * 1023 * 1000 / result; // расчёт реального VCC
 	return result; // возвращает VCC
+}
+
+inline void check_vcc(){
+	if(readVcc() < low_battery_vvc) red_led_blink = 1;
+	else red_led_blink = 0;
+	if(DEBUG){Serial.print("Check VCC: red_led_blink == ");Serial.println(red_led_blink);}
 }

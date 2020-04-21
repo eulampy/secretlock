@@ -18,6 +18,7 @@
 #define LIMIT_PIN		2	// пин концевика на закрытие
 #define LIMIT_HOLD_TIME	500	// время удержания концевика
 #define EXT_BUTTON_PIN	3	// внешняя кнопка (INT1)
+#define EXT_INTERRUPT_NUM	1	// номер внешнего прерывания для кнопки
 
 // сервопривод
 #define SERVOPIN		9
@@ -33,7 +34,8 @@
 enum ButtonStateEnum {RELEASED = 0, PRESSED, WAIT_AFTER_RELEASE};
 enum DeviceStateEnum {WRITE = 0, OPEN, CLOSE} g_state;
 
-uint32_t time;
+//uint32_t time; используется для вывода напряжения питания в консоль
+
 volatile uint32_t limit_press_time = 0;	// время нажатия 
 uint32_t idle_time = 0;			// время последнего действия с внешней кнопкой
 uint8_t red_led_blink = 0;		// флаг включения мигания красного светодиода (обрабатывается в функции  red_led_blinking())
@@ -101,9 +103,17 @@ inline void WriteStateToEEPROM(){
 	eeprom_write_byte((uint8_t *) EEPROM_SETTINGS_START_ADDR, (uint8_t) g_state);
 }
 
+void WakeUpHandler(){detachInterrupt(EXT_INTERRUPT_NUM);}	// обработчик прерывания от внешней кнопки
+
+inline void sleep(){
+	if (DEBUG) {Serial.println("SLEEP");delay(50);}
+	delay(5);
+	attachInterrupt(EXT_INTERRUPT_NUM, WakeUpHandler, RISING);	// включаем прерывание по положительному фронту на порте кнопки
+  	LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);    // спать. mode POWER_OFF, АЦП выкл
+}
+
 inline void red_led_on(){digitalWrite(RED_LED_PIN, HIGH);}
 inline void red_led_off(){digitalWrite(RED_LED_PIN, LOW);}
-void WakeUpHandler(){}	// пустой обработчик прерывания от внешней кнопки
 
 /*********************** прототипы функций ************************************/
 void red_led_blinking();	// моргание красным светодиодом раз в секунду
@@ -117,9 +127,7 @@ void setup() {
 #if DEBUG == 1
 	enc1.setType(TYPE1);
 #endif
-
 	Serial.begin(9600);
-	time = millis();
 	
 	// кнопки
 	pinMode(LIMIT_PIN, INPUT_PULLUP);
@@ -143,7 +151,7 @@ void setup() {
 			g_state = (DeviceStateEnum) somevalue;
 			// на всякий случай приведем в соответствие состояние замка в программе и в реальности
 			if(g_state == OPEN) safelock.open();
-			else safelock.close();
+			else {safelock.close(); idle_time = millis();}
 
 			if(DEBUG){
 				if(g_state == OPEN) Serial.println("g_state = OPEN");
@@ -229,6 +237,7 @@ void loop() {
 							Serial.println("g_state = CLOSE");
 							Serial.println("Door close...");
 						}
+						idle_time = millis();	// начинаем отсчет таймера сна
 						delay(1000);
 					}
 				}
@@ -238,6 +247,10 @@ void loop() {
 		} break;
 		case CLOSE:{
 			CheckResult check_result = knock.CheckSequence();
+			if(knock.is_knock()){ idle_time = millis(); }	// запоминаем время последнего стука
+			else if(millis() - idle_time > 10000){
+				sleep();
+			}
 			if(check_result == SUCCESS){
 				if(DEBUG){
 					Serial.println("CheckSequence() returned TRUE");
@@ -311,6 +324,8 @@ uint8_t is_10secs_hold_down(){
 
 	return 0;
 }
+
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // переключение красного светодиода раз в секунду

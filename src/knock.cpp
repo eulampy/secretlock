@@ -104,6 +104,7 @@ CheckResult Knock::CheckSequence(){
 				ch_last_knock = millis();
 				check_sequence = 1;		
 				if(DEBUG) {Serial.println("0: first press"); led_on();}
+				// return CHECKING
 			}
 			else return NO_KNOCKING;
 			break;
@@ -138,6 +139,7 @@ CheckResult Knock::CheckSequence(){
 						}
 						ch_last_knock = millis();
 						check_sequence = 1;
+						// return CHECKING;
 					}else{	// слишком быстро
 						if(DEBUG) {Serial.print(ch_delay_index); Serial.print(" STOP: "); Serial.print(ch_delay);Serial.print(" < ");Serial.println(delays[ch_delay_index] - DELAY_ERROR); led_off();}
 						reset_check_sequence();

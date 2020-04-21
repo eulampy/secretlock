@@ -3,22 +3,12 @@
 #include <LowPower.h>
 #include "Knock.h"
 
-#ifndef DEBUG
-	#define DEBUG	1
-#endif
-
-#if DEBUG == 1 
-	#include <GyverEncoder.h>
-	#define CLK	7
-	#define DT	8
-	Encoder enc1(CLK, DT);
-#endif
-
 // кнопки
-#define LIMIT_PIN		2	// пин концевика на закрытие
+#define LIMIT_PIN		3	// пин концевика на закрытие
 #define LIMIT_HOLD_TIME	500	// время удержания концевика
-#define EXT_BUTTON_PIN	3	// внешняя кнопка (INT1)
-#define EXT_INTERRUPT_NUM	1	// номер внешнего прерывания для кнопки
+#define EXT_BUTTON_PIN	2	// внешняя кнопка (INT0)
+#define EXT_INTERRUPT_NUM	0	// номер внешнего прерывания для кнопки
+#define EMERGENCY_OPEN_BUTTON_PIN	7 // спрятанная кнопка аварийного открытия
 
 // сервопривод
 #define SERVOPIN		9
@@ -103,12 +93,14 @@ inline void WriteStateToEEPROM(){
 	eeprom_write_byte((uint8_t *) EEPROM_SETTINGS_START_ADDR, (uint8_t) g_state);
 }
 
-void WakeUpHandler(){detachInterrupt(EXT_INTERRUPT_NUM);}	// обработчик прерывания от внешней кнопки
+void WakeUpHandler(){
+	//detachInterrupt(EXT_INTERRUPT_NUM);
+	if(DEBUG)Serial.println("WU");}	// обработчик прерывания от внешней кнопки
 
 inline void sleep(){
 	if (DEBUG) {Serial.println("SLEEP");delay(50);}
 	delay(5);
-	attachInterrupt(EXT_INTERRUPT_NUM, WakeUpHandler, RISING);	// включаем прерывание по положительному фронту на порте кнопки
+	//attachInterrupt(EXT_INTERRUPT_NUM, WakeUpHandler, RISING);	// включаем прерывание по положительному фронту на порту кнопки
   	LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);    // спать. mode POWER_OFF, АЦП выкл
 }
 
@@ -121,16 +113,16 @@ void green_led_blinking();	// моргание зеленым светодиод
 long readVcc();				// чтение напряжение питания
 void check_vcc();			// проверка напряжения питания
 uint8_t is_10secs_hold_down();	// проверка на удерживание кнопки больше 10 секунд
+uint8_t emergency_button_check();	// нажатие аварийной кнопки открытия
 
 
 void setup() {
-#if DEBUG == 1
-	enc1.setType(TYPE1);
-#endif
-	Serial.begin(9600);
+
+	if(DEBUG) Serial.begin(9600);
 	
 	// кнопки
 	pinMode(LIMIT_PIN, INPUT_PULLUP);
+	pinMode(EMERGENCY_OPEN_BUTTON_PIN, INPUT_PULLUP);
 	
 	// светодиоды
 	pinMode(RED_LED_PIN, OUTPUT);
@@ -164,6 +156,8 @@ void setup() {
 	}
 	check_vcc();	// проверка напряжения
 	
+	attachInterrupt(EXT_INTERRUPT_NUM, WakeUpHandler, RISING);	// включаем прерывание по положительному фронту на порту кнопки
+
 	// конец инициализации
 	red_led_off();
 	knock.led_off();
@@ -175,9 +169,7 @@ void setup() {
 
 void loop() {
 	static uint8_t write_step = 0;
-#if DEBUG == 1
-	enc1.tick();	// обязательная функция отработки. Должна постоянно опрашиваться
-#endif
+
 	switch(g_state){
 		case WRITE:{	// запись последовательности
 			if(write_step == 0){	// ждем нажатия кнопки, призывно моргаем светодиодом
@@ -246,11 +238,25 @@ void loop() {
 			}
 		} break;
 		case CLOSE:{
-			CheckResult check_result = knock.CheckSequence();
+
+			// ************** считаем время без нажатий **************
 			if(knock.is_knock()){ idle_time = millis(); }	// запоминаем время последнего стука
 			else if(millis() - idle_time > 10000){
 				sleep();
 			}
+
+			// ************** проверка нажатия аварийной кнопки открытия **************
+			if(emergency_button_check()){
+				if(DEBUG)Serial.println("emergency button pressed, g_state = OPEN");
+				safelock.open();
+				g_state = OPEN; WriteStateToEEPROM();
+				delay(1000);
+				check_vcc();	// проверим напряжение батареек
+
+			}
+
+			// ************** ожидание/распознавание последовательности **************
+			CheckResult check_result = knock.CheckSequence();
 			if(check_result == SUCCESS){
 				if(DEBUG){
 					Serial.println("CheckSequence() returned TRUE");
@@ -271,15 +277,6 @@ void loop() {
 	} // end of switch
 
 #if DEBUG == 1	
-	if (enc1.isLeft()) {
-		safelock.close();
-		g_state = CLOSE; WriteStateToEEPROM();
-	}
-	if (enc1.isRight()) {
-		safelock.open();
-		g_state = OPEN; WriteStateToEEPROM();
-	}
-
 	// if((millis() - time > 500) && (g_state != WRITE))
 	// {
 	// 	time = millis();
@@ -294,10 +291,9 @@ void loop() {
 ////////////////////////////////////////////////////////////////////////////////
 // проверка на удерживание кнопки больше 10 секунд
 uint8_t is_10secs_hold_down(){
-	static unsigned long hold_down_time = 0;
+	static uint32_t hold_down_time = 0;
 	static ButtonStateEnum func_state = RELEASED;
 
-	///static uint8_t func_state = 0;	// 0 - нет удержания, 1 - считаем время удерживания, 2 - ждем секунду после отпускания
 	switch (func_state) {
 		case RELEASED:
 			if(knock.is_knock()){
@@ -362,6 +358,39 @@ void green_led_blinking(){
 }
 
 
+////////////////////////////////////////////////////////////////////////////////
+// проверка ужержания аварийной кнопки открытия
+uint8_t emergency_button_check(){
+	const uint16_t c_holding_time = 3000;	// необходимое время удержания
+	static ButtonStateEnum func_state = RELEASED;
+	static uint32_t hold_down_time = 0;
+
+	switch (func_state) {
+		case RELEASED:
+			if(digitalRead(EMERGENCY_OPEN_BUTTON_PIN) == LOW){
+				hold_down_time = millis();
+				func_state = PRESSED;
+			}
+			break;
+		case PRESSED:
+			if(digitalRead(EMERGENCY_OPEN_BUTTON_PIN) == LOW){	// если кнопка все еще нажата
+				if(millis() - hold_down_time > c_holding_time){	
+					func_state = WAIT_AFTER_RELEASE;	// сделаем паузу
+					hold_down_time = millis();
+					return 1;
+				}
+			}else{ // отпустили раньше
+				func_state = RELEASED;	
+			}
+		break;
+		case WAIT_AFTER_RELEASE:
+			if(millis() - hold_down_time > 1000) func_state = RELEASED;
+	}	// enf of switch
+
+	return 0;
+}
+
+
 const float my_vcc_const = 1.095;		// начальное значение константы вольтметра
 const long low_battery_vvc = 3500;		// минимальное значение питания
 
@@ -391,3 +420,4 @@ inline void check_vcc(){
 	else red_led_blink = 0;
 	if(DEBUG){Serial.print("Check VCC: red_led_blink == ");Serial.println(red_led_blink);}
 }
+

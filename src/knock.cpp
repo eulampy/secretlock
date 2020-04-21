@@ -1,5 +1,8 @@
 #include "Knock.h"
 
+
+////////////////////////////////////////////////////////////////////////////////
+// Конструктор
 Knock::Knock(uint8_t _led_pin, uint8_t _sensor_pin):
 	led_pin(_led_pin), sensor_pin(_sensor_pin){
 	pinMode(led_pin, OUTPUT);
@@ -94,7 +97,6 @@ void Knock::PlaySequence(){
 ////////////////////////////////////////////////////////////////////////////////////////
 // Чтение последовательности
 // возвращает SUCCESS
-// TODO: удалить из функции все вызовы led_on и led_off
 CheckResult Knock::CheckSequence(){
 	if(delays_count == 0) return NO_SEQUENCE;	// последовательность не была записана
 	ch_delay = millis() - ch_last_knock;
@@ -103,7 +105,7 @@ CheckResult Knock::CheckSequence(){
 			if(is_knock()){
 				ch_last_knock = millis();
 				check_sequence = 1;		
-				if(DEBUG) {Serial.println("0: first press"); led_on();}
+				if(DEBUG) {Serial.println("0: first press");}
 				// return CHECKING
 			}
 			else return NO_KNOCKING;
@@ -112,36 +114,33 @@ CheckResult Knock::CheckSequence(){
 			if(ch_delay >= 50 && ch_delay <= KNOCK_TIMEOUT){
 				if(!is_knock()){	// кнопка уже не нажата
 					check_sequence = 2;
-					if(DEBUG) led_off();	// удалить
 				}
 			}else if(ch_delay > KNOCK_TIMEOUT){	// кнопка была нажата слишком долго
 				reset_check_sequence();
-				if(DEBUG) led_off();	// удалить
 				return FAIL;
 			}
 			break;
 		case 2:	// ждем нажатия кнопки
 			if(ch_delay > delays[ch_delay_index] + DELAY_ERROR){	// слишком долго
-				if(DEBUG) {Serial.print(ch_delay_index); Serial.print(" STOP: "); Serial.print(ch_delay);Serial.print(" > ");Serial.println(delays[ch_delay_index] + DELAY_ERROR); led_off();}
+				if(DEBUG) {Serial.print(ch_delay_index); Serial.print(" STOP: "); Serial.print(ch_delay);Serial.print(" > ");Serial.println(delays[ch_delay_index] + DELAY_ERROR); }
 				reset_check_sequence();
 				return FAIL;
 			}else{
 				if(is_knock()){	// снова стук
-					if(DEBUG) led_on();	// удалить
 					if((DELAY_ERROR > delays[ch_delay_index]) || (ch_delay >= delays[ch_delay_index] - DELAY_ERROR)){ // и из условия выше !(ch_delay > delays[ch_delay_index] + DELAY_ERROR)
 						if(ch_delay_index < delays_count - 1){
 							if(DEBUG) {Serial.print(ch_delay_index); Serial.print(" OK: "); Serial.print(delays[ch_delay_index] - DELAY_ERROR); Serial.print(" < "); Serial.print(ch_delay);Serial.print(" < "); Serial.println(delays[ch_delay_index] + DELAY_ERROR);}
 							ch_delay_index++;
 						}else{	// достигли конца последовательности
 							reset_check_sequence();
-							if(DEBUG) {Serial.println("TADAAAAAM");led_off();}
+							if(DEBUG) {Serial.println("TADAAAAAM");}
 							return SUCCESS;
 						}
 						ch_last_knock = millis();
 						check_sequence = 1;
 						// return CHECKING;
 					}else{	// слишком быстро
-						if(DEBUG) {Serial.print(ch_delay_index); Serial.print(" STOP: "); Serial.print(ch_delay);Serial.print(" < ");Serial.println(delays[ch_delay_index] - DELAY_ERROR); led_off();}
+						if(DEBUG) {Serial.print(ch_delay_index); Serial.print(" STOP: "); Serial.print(ch_delay);Serial.print(" < ");Serial.println(delays[ch_delay_index] - DELAY_ERROR); }
 						reset_check_sequence();
 						return FAIL;
 					}

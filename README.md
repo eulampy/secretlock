@@ -10,7 +10,8 @@
 - При настукивании правильной последовательности открывает замок
 
 ## Схема
-  !!!вставить схему
+ 
+![SCHEME](https://github.com/eulampy/secretlock/blob/master/doc/Schematic_secret_lock.png)
 
 <a id="chapter-3"></a>
 ## Материалы и компоненты

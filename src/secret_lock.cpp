@@ -93,9 +93,7 @@ inline void WriteStateToEEPROM(){
 	eeprom_write_byte((uint8_t *) EEPROM_SETTINGS_START_ADDR, (uint8_t) g_state);
 }
 
-void WakeUpHandler(){
-	//detachInterrupt(EXT_INTERRUPT_NUM);
-	if(DEBUG)Serial.println("WU");}	// обработчик прерывания от внешней кнопки
+void WakeUpHandler(){}	// обработчик прерывания от внешней кнопки
 
 inline void sleep(){
 	if (DEBUG) {Serial.println("SLEEP");delay(50);}
@@ -195,7 +193,8 @@ void loop() {
 						//Serial.println("end PlaySequence()");
 						//safelock.bzzz();
 						Serial.println("g_state = OPEN");
-					}
+					}else knock.PlaySequence();
+
 					knock.WriteEEPROMData();
 					g_state = OPEN; WriteStateToEEPROM();
 				}else{

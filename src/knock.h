@@ -6,7 +6,7 @@
 #define EEPROM_SETTINGS_START_ADDR	0x0A
 
 #ifndef DEBUG
-	#define DEBUG	1         // режим отладки 
+	#define DEBUG	0         // режим отладки 
 #endif
 
 enum CheckResult {NO_KNOCKING = 0, CHECKING, NO_SEQUENCE, FAIL, SUCCESS};

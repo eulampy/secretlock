@@ -11,7 +11,7 @@
 
 ## Схема
  
-![SCHEME](https://github.com/eulampy/secretlock/blob/master/doc/Schematic_secret_lock.png)
+(https://github.com/eulampy/secretlock/blob/master/doc/Schematic_secret_lock.png)
 
 <a id="chapter-3"></a>
 ## Материалы и компоненты

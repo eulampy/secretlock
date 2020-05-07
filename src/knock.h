@@ -32,17 +32,15 @@ public:
 // ****** переменные ******
 	uint8_t delays_count = 0;
 	uint16_t delays[MAX_KNOCKS_COUNT];
-// ****** типы ******
-	//enum myenum{ ONE, TWO}myenum;
-	//CheckResult foo();
+
 private:
 	Knock(){};
 	uint8_t led_pin, sensor_pin;
 	// переменные с префиксом ch_ используются в функции CheckSequence()
-	long ch_last_knock = 0; 
+	uint32_t ch_last_knock = 0; 
 	uint8_t ch_delay_index = 0;
 	uint8_t check_sequence = 0;
-	long ch_delay = 0;
+	uint32_t ch_delay = 0;
 	inline void reset_check_sequence(){	check_sequence = 0;	ch_delay_index = 0;	ch_last_knock = 0; while(is_knock());}
 
 };

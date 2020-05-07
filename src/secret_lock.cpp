@@ -4,11 +4,10 @@
 #include "Knock.h"
 
 // кнопки
-#define LIMIT_PIN		3	// пин концевика на закрытие
+#define LIMIT_PIN		7	// пин концевика на закрытие
 #define LIMIT_HOLD_TIME	500	// время удержания концевика
 #define EXT_BUTTON_PIN	2	// внешняя кнопка (INT0)
-#define EXT_INTERRUPT_NUM	0	// номер внешнего прерывания для кнопки
-#define EMERGENCY_OPEN_BUTTON_PIN	7 // спрятанная кнопка аварийного открытия
+#define EMERGENCY_OPEN_BUTTON_PIN	3 // спрятанная кнопка аварийного открытия (INT1)
 
 // сервопривод
 #define SERVOPIN		9
@@ -23,8 +22,6 @@
 // глобальные переменные и типы
 enum ButtonStateEnum {RELEASED = 0, PRESSED, WAIT_AFTER_RELEASE};
 enum DeviceStateEnum {WRITE = 0, OPEN, CLOSE} g_state;
-
-//uint32_t time; используется для вывода напряжения питания в консоль
 
 volatile uint32_t limit_press_time = 0;	// время нажатия 
 uint32_t idle_time = 0;			// время последнего действия с внешней кнопкой
@@ -93,12 +90,12 @@ inline void WriteStateToEEPROM(){
 	eeprom_write_byte((uint8_t *) EEPROM_SETTINGS_START_ADDR, (uint8_t) g_state);
 }
 
-void WakeUpHandler(){}	// обработчик прерывания от внешней кнопки
+void WakeUpHandlerExt(){}	// обработчик прерывания от внешней кнопки
+void WakeUpHandlerEmergency(){}	// обработчик прерывания от аварийной кнопки
 
 inline void sleep(){
 	if (DEBUG) {Serial.println("SLEEP");delay(50);}
 	delay(5);
-	//attachInterrupt(EXT_INTERRUPT_NUM, WakeUpHandler, RISING);	// включаем прерывание по положительному фронту на порту кнопки
   	LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);    // спать. mode POWER_OFF, АЦП выкл
 }
 
@@ -129,8 +126,6 @@ void setup() {
 	red_led_on();
 	knock.led_on();
 	
-	//pinMode(GREEN_LED_PIN, OUTPUT);
-
 	uint8_t somevalue = eeprom_read_byte((uint8_t *) EEPROM_SETTINGS_START_ADDR); // читаем значение g_state из EEPROM
 	if(somevalue > CLOSE || somevalue == WRITE){ // прочиталась фигня
 		if(DEBUG){Serial.print("Bad g_state value from EEPROM: "); Serial.println(somevalue); Serial.println("g_state = WRITE");}
@@ -155,7 +150,8 @@ void setup() {
 	}
 	check_vcc();	// проверка напряжения
 	
-	attachInterrupt(EXT_INTERRUPT_NUM, WakeUpHandler, RISING);	// включаем прерывание по положительному фронту на порту кнопки
+	attachInterrupt(0, WakeUpHandlerExt, RISING);	// включаем прерывание по положительному фронту на порту кнопки
+	attachInterrupt(1, WakeUpHandlerEmergency, FALLING);	// включаем прерывание по отрицательному фронту на порту аварийной кнопки
 
 	// конец инициализации
 	red_led_off();
@@ -195,11 +191,7 @@ void loop() {
 						for(uint8_t i = 0; i < knock.delays_count; i++){
 							Serial.print(i);	Serial.print("\t");	Serial.println(knock.delays[i]);
 						}
-						//Serial.println("start PlaySequence()");
-						//safelock.bzzz();
 						knock.PlaySequence();
-						//Serial.println("end PlaySequence()");
-						//safelock.bzzz();
 						Serial.println("g_state = OPEN");
 					}else{
 						knock.led_on();
@@ -376,6 +368,7 @@ uint8_t emergency_button_check(){
 	switch (func_state) {
 		case RELEASED:
 			if(digitalRead(EMERGENCY_OPEN_BUTTON_PIN) == LOW){
+				idle_time = millis();	// сброс счетчика сна
 				hold_down_time = millis();
 				func_state = PRESSED;
 			}

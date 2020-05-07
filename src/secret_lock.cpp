@@ -165,6 +165,16 @@ void setup() {
 
 void loop() {
 	static uint8_t write_step = 0;
+	
+	// ************** проверка нажатия аварийной кнопки открытия **************
+	if(emergency_button_check() && g_state != WRITE){
+		if(DEBUG)Serial.println("emergency button pressed, g_state = OPEN");
+		safelock.open();
+		if(g_state != OPEN) {g_state = OPEN; WriteStateToEEPROM();}
+		delay(1000);
+		check_vcc();	// проверим напряжение батареек
+	}
+
 
 	switch(g_state){
 		case WRITE:{	// запись последовательности
@@ -251,16 +261,6 @@ void loop() {
 			if(knock.is_knock()){ idle_time = millis(); }	// запоминаем время последнего стука
 			else if(millis() - idle_time > 10000){
 				sleep();
-			}
-
-			// ************** проверка нажатия аварийной кнопки открытия **************
-			if(emergency_button_check()){
-				if(DEBUG)Serial.println("emergency button pressed, g_state = OPEN");
-				safelock.open();
-				g_state = OPEN; WriteStateToEEPROM();
-				delay(1000);
-				check_vcc();	// проверим напряжение батареек
-
 			}
 
 			// ************** ожидание/распознавание последовательности **************

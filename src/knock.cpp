@@ -85,7 +85,7 @@ void Knock::PlaySequence(){
 		led_off();
 
 		for(uint8_t i = 0; i < delays_count; i++){
-			delay(delays[i] - 50); // тут может получиться очень большая величина, если записанный интервал будет меньше 50 мс
+			delay(delays[i] < 50 ? 50: delays[i] - 50);
 			led_on();
 			delay(50);
 			led_off();

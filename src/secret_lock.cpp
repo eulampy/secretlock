@@ -70,9 +70,9 @@ public:
 			s.attach(servo_pin);
 			digitalWrite(mosfet_pin, HIGH);
 			s.write(open_val+5);
-			delay(100);
+			delay(50);
 			s.write(open_val);
-			delay(100);
+			delay(50);
 			digitalWrite(mosfet_pin, LOW);
 			s.detach();
 		}
@@ -150,6 +150,7 @@ void setup() {
 		}else{
 			g_state = WRITE;
 			if(DEBUG) Serial.println("g_state = WRITE");
+			safelock.open();	// если вдруг замок был закрыт, открываем его
 		}
 	}
 	check_vcc();	// проверка напряжения
@@ -159,9 +160,6 @@ void setup() {
 	// конец инициализации
 	red_led_off();
 	knock.led_off();
-
-	
-	
 }
 
 
@@ -193,8 +191,19 @@ void loop() {
 						//Serial.println("end PlaySequence()");
 						//safelock.bzzz();
 						Serial.println("g_state = OPEN");
-					}else knock.PlaySequence();
+					}else{
+						knock.led_on();
+						safelock.bzzz();	// функция "работает" 100 мс
+						knock.led_off();
 
+						for(uint8_t i = 0; i < knock.delays_count; i++){
+							delay(knock.delays[i] < 100 ? 100: knock.delays[i] - 100);
+							knock.led_on();
+							safelock.bzzz();
+							knock.led_off();
+						}
+					}
+						
 					knock.WriteEEPROMData();
 					g_state = OPEN; WriteStateToEEPROM();
 				}else{
